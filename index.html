@@ -6,17 +6,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script>
-/* ===== الصق إعدادات Firebase بتاعتك هنا (بدل كلمة PASTE) ===== */
-window.FIREBASE_CONFIG={
-  apiKey:"AIzaSyA9ZPj02mEmSyEnChv9VuaSU83bUJT0gtk",
-  authDomain:"molds-wash.firebaseapp.com",
-  projectId:"molds-wash",
-  storageBucket:"molds-wash.firebasestorage.app",
-  messagingSenderId:"271203364672",
-  appId:"1:271203364672:web:467b834a40396cc0ad54a5"
-};
-</script>
+<script src="firebase-config.js"></script>
 <style>
 /* Layout: one narrow column, phone first. Header with date, tab strip, one view at a time.
    Palette: cooling-water teal on cool steel greys; washers get a violet-grey tint. */
@@ -421,7 +411,7 @@ async function boot(){
   render();
   setTimeout(()=>{if(!(S.loaded.c&&S.loaded.g)){S.slow=true;render()}},10000);
   const fc=window.FIREBASE_CONFIG;
-  if(!fc||!fc.projectId||String(fc.projectId).indexOf('PASTE')>=0){S.err='لسه ما اتحطتش إعدادات Firebase في أول الملف.';return render()}
+  if(!fc||!fc.projectId||String(fc.projectId).indexOf('PASTE')>=0){S.err='ملف firebase-config.js ناقص أو فيه كلمة PASTE. اتأكد إنه مرفوع جنب index.html وفيه إعدادات Firebase بتاعتك.';return render()}
   if(!window.firebase){S.err='مقدرتش أحمّل Firebase. اتأكد من الإنترنت.';return render()}
   let db;try{firebase.initializeApp(fc);db=firebase.firestore()}catch(e){S.err='إعدادات Firebase غلط.';return render()}
   S.db=db;S.canWrite=true;S.isAdmin=true;
