@@ -159,7 +159,8 @@ function compute(){
   const done=new Map(),last=new Map();
   for(const w of S.washes){const n=toN(w.date);
     if(!last.has(w.code)||last.get(w.code)<n)last.set(w.code,n);
-    if(n>=cs&&n<ncs&&(!done.has(w.code)||done.get(w.code).n<n))done.set(w.code,{n,w})}
+    const inCyc=w.cyc!=null?w.cyc===k:(n>=cs&&n<ncs);
+    if(inCyc&&(!done.has(w.code)||done.get(w.code).n<n))done.set(w.code,{n,w})}
   const order=S.molds.slice().sort((a,b)=>((a.d==null?1e9:a.d)-(b.d==null?1e9:b.d))||(a.s-b.s));
   const rem=order.filter(m=>!done.has(m.c));
   const lateDays=m=>(m.d&&!pre&&cs+m.d-1<T)?T-(cs+m.d-1):0;
@@ -176,7 +177,7 @@ function compute(){
   const finish=days.length?days[days.length-1].n:null;
   let prevMissed=null;
   if(k>0&&S.loaded.w){const ps=cycleStart(cfg.baseStart,k-1),seen=new Set();
-    for(const w of S.washes){const n=toN(w.date);if(n>=ps&&n<cs)seen.add(w.code)}
+    for(const w of S.washes){const n=toN(w.date);if(w.cyc!=null?w.cyc===k-1:(n>=ps&&n<cs))seen.add(w.code)}
     prevMissed=order.filter(m=>!seen.has(m.c)).length}
   C={T,k,cs,ncs,pre,done,last,order,rem,lateDays,overdue,todayDone,days,doneCount,expected,finish,prevMissed,capToday:capOf(T)};
 }
@@ -188,7 +189,7 @@ async function guard(fn,okMsg){try{await fn();if(okMsg)toast(okMsg)}catch(e){toa
 const wid=(code,iso)=>code+'_'+iso;
 async function wash(code,iso){if(!canWriteNow())return;
   if(!S.who){toast('اكتب اسمك الأول في الخانة اللي فوق.');const w=$('#whoIn');if(w)w.focus();return}
-  await guard(()=>S.db.collection('washes').doc(wid(code,iso)).set({code,date:iso,by:S.who,at:Date.now()}),'اتسجل الغسيل')}
+  await guard(()=>S.db.collection('washes').doc(wid(code,iso)).set({code,date:iso,by:S.who,cyc:C?C.k:0,at:Date.now()}),'اتسجل الغسيل وعُلّمت الاسطمبة إنها خلصت')}
 async function unwash(code,iso){if(!canWriteNow())return;
   await guard(()=>S.db.collection('washes').doc(wid(code,iso)).delete(),'اتشال التسجيل')}
 async function seedAll(){if(!canWriteNow())return;
@@ -314,7 +315,7 @@ function moldListHtml(){
       const hs=S.washes.filter(w=>w.code===m.c).sort((a,b)=>a.date<b.date?1:-1);
       const bd=S.backDate||todayISO(),mn=fromN(S.winStart||C.cs);
       h+='<div class="exp"><div class="sub">سجل الغسيل المتاح:</div><div class="hist">'+(hs.length?hs.map(w=>'<span class="tag mute">'+esc(fDate(toN(w.date)))+(S.canWrite===false?'':' <button data-act="delWash" data-code="'+esc(m.c)+'" data-date="'+esc(w.date)+'" aria-label="حذف التسجيل">×</button>')+'</span>').join(''):'<span class="sub">مفيش تسجيلات.</span>')+'</div>'
-       +(S.canWrite===false?'':'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"><label class="f" style="flex:1;min-width:150px">تاريخ الغسيل<input type="date" id="bDate" value="'+esc(bd)+'" min="'+esc(mn)+'" max="'+esc(todayISO())+'"></label><button class="btn primary" data-act="addWash" data-code="'+esc(m.c)+'">سجل غسيل</button>'
+       +(S.canWrite===false?'':'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"><label class="f" style="flex:1;min-width:150px">تاريخ الغسيل<input type="date" id="bDate" value="'+esc(bd)+'" min="'+esc(mn)+'" max="'+esc(todayISO())+'"></label><button class="btn primary" data-act="addWash" data-code="'+esc(m.c)+'">سجل غسيل</button><span class="sub" style="flex-basis:100%">التسجيل بيعلّم الاسطمبة إنها اتغسلت في الدورة الحالية بالتاريخ اللي اخترته.</span>'
        +(S.confirmDel===m.c?'<button class="btn danger" data-act="doDel" data-code="'+esc(m.c)+'">تأكيد الحذف</button><button class="btn" data-act="noDel">إلغاء</button>':'<button class="btn danger" data-act="askDel" data-code="'+esc(m.c)+'">حذف الاسطمبة</button>')+'</div>')+'</div>'}
     h+='</div>'});
   return {h,total,shown:ms.length}}
@@ -378,7 +379,7 @@ document.addEventListener('click',async ev=>{
   if(a==='moreMolds'){S.lim+=60;return renderMoldList()}
   if(a==='open'){S.open=S.open===code?null:code;S.confirmDel=null;S.backDate='';return renderMoldList()}
   if(a==='addWash'){const d=$('#bDate').value;if(!d){toast('اختار التاريخ.');return}
-    if(toN(d)>C.T){toast('التاريخ لازم يكون النهارده أو قبله.');return}return wash(code,d)}
+    if(toN(d)>C.T){toast('التاريخ لازم يكون النهارده أو قبله.');return}S.backDate='';return wash(code,d)}
   if(a==='delWash')return unwash(code,b.dataset.date);
   if(a==='askDel'){S.confirmDel=code;return renderMoldList()}
   if(a==='noDel'){S.confirmDel=null;return renderMoldList()}
