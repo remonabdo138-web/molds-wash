@@ -187,6 +187,15 @@ function compute(){
     for(const w of S.washes){const n=toN(w.date);if(w.cyc!=null?w.cyc===k-1:(n>=ps&&n<cs))seen.add(w.code)}
     prevMissed=order.filter(m=>!seen.has(m.c)).length}
   C={T,k,cs,ncs,pre,done,last,order,rem,lateDays,pinOf,overdue,todayDone,days,doneCount,expected,finish,prevMissed,capToday:capOf(T)};
+  const pd=m=>{const pn=pinOf(m);return pn!=null?pn-cs+1:(m.d||null)};
+  let maxD=0;order.forEach(m=>{const x=pd(m);if(x)maxD=Math.max(maxD,x)});
+  const wk={};
+  for(const w of S.washes){const n=toN(w.date);const ic=w.cyc!=null?w.cyc===k:(n>=cs&&n<ncs);if(!ic)continue;
+    const wi=Math.floor((n-cs)/7);if(wi<0)continue;(wk[wi]=wk[wi]||new Set()).add(w.code)}
+  const lastW=Object.keys(wk).reduce((a,x)=>Math.max(a,+x),-1),nW=Math.max(Math.ceil(maxD/7),lastW+1),weeks=[];
+  for(let wi=0;wi<nW;wi++){const planned=order.filter(m=>{const x=pd(m);return x&&x>wi*7&&x<=wi*7+7}).length,dn=wk[wi]?wk[wi].size:0;
+    weeks.push({i:wi,ws:cs+7*wi,we:cs+7*wi+6,planned,done:dn,pct:planned?Math.round(dn/planned*100):null})}
+  C.weeks=weeks;C.curWeek=(!pre&&T>=cs)?Math.floor((T-cs)/7):null;
 }
 
 /* ---------- writes ---------- */
@@ -264,6 +273,19 @@ function row(m,opt){
   return '<li class="row'+(isDone?' done':'')+'"><button class="chk" data-act="'+act+'" data-code="'+esc(m.c)+'"'+dis+' aria-label="'+(isDone?'إلغاء تسجيل غسيل ':'تسجيل غسيل ')+esc(m.n)+'">'+(isDone?chk:'')+'</button>'
    +'<div class="mt"><div class="nm">'+esc(m.n)+'</div><div class="meta"><span class="code">'+esc(m.c)+'</span><span class="chip" data-k="'+kind(m.g)+'">'+esc(m.g)+'</span>'+tag+pinTag(m)+'</div></div></li>'}
 
+const pctTag=(p,future)=>{if(p==null||future)return '<span class="tag mute">—</span>';return '<span class="tag '+(p>=90?'ok':p>=60?'warn':'late')+'">'+p+'%</span>'};
+function weekLine(){
+  const w=C.curWeek!=null?C.weeks[C.curWeek]:null;if(!w||!w.planned)return '';
+  return '<p class="sub" style="margin:10px 0 0">إنجاز الأسبوع ده: '+w.done+' من '+w.planned+' ('+(w.pct==null?0:w.pct)+'%) · '+esc(fMed(w.ws))+' ← '+esc(fMed(w.we))+'</p>'}
+function weeklyHtml(){
+  if(!C.weeks.length)return '';
+  const cur=C.curWeek!=null?C.weeks[C.curWeek]:null;
+  let h='<h2>الإنجاز الأسبوعي</h2>';
+  if(cur&&cur.planned){h+='<div class="panel pad" style="display:grid;gap:8px;margin-bottom:10px"><div class="row-flex"><span>الأسبوع الحالي ('+esc(fMed(cur.ws))+' ← '+esc(fMed(cur.we))+')</span><b>'+cur.pct+'%</b></div><div class="bar'+(cur.pct>=100?' ok':'')+'"><i style="width:'+Math.min(100,cur.pct)+'%"></i></div><span class="sub">اتنفذ '+cur.done+' من '+cur.planned+' اسطمبة مطلوبة الأسبوع ده.</span></div>'}
+  h+='<div class="panel scroll"><table><thead><tr><th>الأسبوع</th><th>الفترة</th><th>المطلوب</th><th>اتنفذ</th><th>النسبة</th></tr></thead><tbody>';
+  C.weeks.forEach(w=>{const fut=C.curWeek==null||w.i>C.curWeek,isCur=w.i===C.curWeek;
+    h+='<tr'+(isCur?' style="font-weight:700"':'')+'><td>'+(w.i+1)+(isCur?' (الحالي)':'')+'</td><td>'+esc(fMed(w.ws))+' ← '+esc(fMed(w.we))+'</td><td>'+w.planned+'</td><td>'+w.done+'</td><td>'+pctTag(w.pct,fut&&w.done===0)+'</td></tr>'});
+  return h+'</tbody></table></div><p class="sub">المطلوب = عدد الاسطمبات اللي الخطة محددة ليها الأسبوع ده. اتنفذ = الاسطمبات اللي اتسجل ليها غسيل في نفس الأسبوع (السبت لحد الجمعة).</p>'}
 function viewToday(){
   if(C.pre)return '<div class="panel empty">الدورة الأولى تبدأ '+esc(fLong(C.cs))+'.<br>لسه '+(C.cs-C.T)+' يوم.</div>';
   const first=C.days.length&&C.days[0].n===C.T?C.days[0].items:[];
@@ -273,6 +295,7 @@ function viewToday(){
    +'<div class="big">'+C.todayDone.length+' <small>من '+total+' اسطمبة</small></div></div>'
    +(C.overdue.length?'<span class="tag late">'+C.overdue.length+' متأخرة من أيام فاتت</span>':'<span class="tag ok">مفيش متأخر</span>')+'</div>'
    +'<div class="bar'+(pct===100?' ok':'')+'"><i style="width:'+pct+'%"></i></div></div>';
+  h+=weekLine();
   if(!total&&!C.rem.length)h+='<div class="panel empty" style="margin-top:12px">كل اسطمبات الدورة اتغسلت. تمام.</div>';
   else if(!total)h+='<div class="panel empty" style="margin-top:12px">حد اليوم اتغطى بالكامل.</div>';
   else{
@@ -311,6 +334,7 @@ function viewStats(){
   if(C.finish!=null&&C.finish>=C.ncs)h='<div class="note bad">بالمعدل ده الدورة هتخلص بعد ما الدورة الجاية تبدأ ('+esc(fDate(C.ncs))+'). محتاج تزود الحد اليومي أو تأجل بعض الاسطمبات.</div>'+h;
   if(C.prevMissed)h='<div class="note warn">'+C.prevMissed+' اسطمبة ما اتسجلش ليها غسيل في الدورة السابقة.</div>'+h;
   const gs=[];const seen={};C.order.forEach(m=>{if(!seen[m.g]){seen[m.g]={t:0,d:0};gs.push(m.g)}seen[m.g].t++;if(C.done.has(m.c))seen[m.g].d++});
+  h+=weeklyHtml();
   h+='<h2>حسب المجموعة</h2><div class="panel" style="padding-block:6px">';
   gs.forEach(g=>{const o=seen[g],p=Math.round(o.d/o.t*100);h+='<div class="gbar"><span>'+esc(g)+'</span><div class="bar'+(p===100?' ok':'')+'"><i style="width:'+p+'%"></i></div><span>'+o.d+' / '+o.t+'</span></div>'});
   h+='</div><h2>مواعيد الدورات القادمة</h2><div class="panel scroll"><table><thead><tr><th>الدورة</th><th>تبدأ</th></tr></thead><tbody>';
