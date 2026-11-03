@@ -230,6 +230,107 @@ function resetCardHtml(){
   return '<h2>بدء من جديد</h2><div class="panel pad" style="display:grid;gap:10px;margin-top:8px"><p class="sub" style="margin:0">بيحمّل قايمة الاسطمبات الجديدة ('+n+' اسطمبة) بدل القايمة الحالية، وبيمسح كل سجل الغسيل، وبيرجّع الإعدادات للقيم الافتراضية (بداية 7 نوفمبر 2026، 6 في اليوم، 3 يوم الجمعة).</p>'
    +(S.confirmReset?'<div class="note bad" style="margin:0">متأكد؟ كل سجل الغسيل هيتمسح ومفيش رجوع.</div><div style="display:flex;gap:8px"><button class="btn danger" data-act="doReset"'+(S.busy?' disabled':'')+'>'+(S.busy?'جاري التنفيذ…':'أيوه، ابدأ من جديد')+'</button><button class="btn" data-act="noReset"'+(S.busy?' disabled':'')+'>إلغاء</button></div>'
      :'<div><button class="btn danger" data-act="askReset">بدء من جديد</button></div>')+'</div>'}
+/* ---------- تقرير Excel (من غير أي مكتبة خارجية) ---------- */
+const CRC_T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC_T[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],cd=[];let off=0;
+  const u16=n=>[n&255,(n>>>8)&255],u32=n=>[n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255];
+  for(const f of files){
+    const nm=enc.encode(f.name),crc=crc32(f.data),sz=f.data.length;
+    const lh=new Uint8Array([0x50,0x4b,3,4,...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(sz),...u32(sz),...u16(nm.length),...u16(0)]);
+    parts.push(lh,nm,f.data);
+    cd.push(new Uint8Array([0x50,0x4b,1,2,...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(sz),...u32(sz),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),nm);
+    off+=lh.length+nm.length+sz}
+  let cdSize=0;cd.forEach(p=>{cdSize+=p.length});
+  const end=new Uint8Array([0x50,0x4b,5,6,...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(cdSize),...u32(off),...u16(0)]);
+  return new Blob([...parts,...cd,end],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}
+const xe=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
+function colName(i){let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s}
+function sheetXml(rows,widths,freeze){
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0">'+(freeze?'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>':'')+'</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>';
+  if(widths)x+='<cols>'+widths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('')+'</cols>';
+  x+='<sheetData>';
+  rows.forEach((r,ri)=>{x+='<row r="'+(ri+1)+'">';
+    r.forEach((c,ci)=>{if(c===null||c===undefined||c==='')return;
+      let v=c,s=0;if(typeof c==='object'){v=c.v;s=c.s||0}
+      const ref=colName(ci)+(ri+1),sa=s?' s="'+s+'"':'';
+      if(typeof v==='number')x+='<c r="'+ref+'"'+sa+'><v>'+v+'</v></c>';
+      else x+='<c r="'+ref+'" t="inlineStr"'+sa+'><is><t xml:space="preserve">'+xe(v)+'</t></is></c>'});
+    x+='</row>'});
+  return x+'</sheetData></worksheet>'}
+const XNS='http://schemas.openxmlformats.org/spreadsheetml/2006/main',XH='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+function makeXlsx(sheets){
+  const enc=new TextEncoder(),E=s=>enc.encode(s),n=sheets.length;
+  const files=[
+   {name:'[Content_Types].xml',data:E(XH+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((s,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>')},
+   {name:'_rels/.rels',data:E(XH+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')},
+   {name:'xl/workbook.xml',data:E(XH+'<workbook xmlns="'+XNS+'" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>'<sheet name="'+xe(s.name)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+'</sheets></workbook>')},
+   {name:'xl/_rels/workbook.xml.rels',data:E(XH+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+'<Relationship Id="rId'+(n+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')},
+   {name:'xl/styles.xml',data:E(XH+'<styleSheet xmlns="'+XNS+'"><fonts count="3"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9EAF7"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')}];
+  sheets.forEach((s,i)=>files.push({name:'xl/worksheets/sheet'+(i+1)+'.xml',data:E(sheetXml(s.rows,s.widths,s.freeze))}));
+  return zipStore(files)}
+function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
+const XH_=t=>t.map(v=>({v,s:1})),XP=v=>({v,s:2}),XB=v=>({v,s:3}),XL=v=>({v,s:4});
+const DAYN=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function buildReport(){
+  const T=C.T,cs=C.cs,ncs=C.ncs,tot=C.order.length,byCode=new Map(S.molds.map(m=>[m.c,m]));
+  const pdm=m=>{const pn=C.pinOf(m);return pn!=null?pn-cs+1:(m.d||null)};
+  const plannedBy=new Map();let maxD=0;
+  C.order.forEach(m=>{const x=pdm(m);if(x){plannedBy.set(x,(plannedBy.get(x)||0)+1);maxD=Math.max(maxD,x)}});
+  const doneBy=new Map();let before=0,lastN=cs-1;
+  C.order.forEach(m=>{const d=C.done.get(m.c);if(!d)return;if(d.n<cs){before++;return}doneBy.set(d.n,(doneBy.get(d.n)||0)+1);lastN=Math.max(lastN,d.n)});
+  const endN=Math.min(ncs-1,Math.max(cs+maxD-1,lastN));
+  const frac=(a,b)=>b?Math.round(a/b*1000)/1000:'';
+  /* يومي */
+  const daily=[XH_(['التاريخ','اليوم','المخطط','المحقق','الفرق (محقق − مخطط)','نسبة إنجاز اليوم','مخطط تراكمي','محقق تراكمي','المتبقي نهاية اليوم','نسبة الإنجاز التراكمية'])];
+  let cp=0,cd=before,sp=0,sd=before;
+  if(before){daily.push(['قبل بداية الدورة','',0,before,before,'',0,before,tot-before,XP(frac(before,tot))])}
+  for(let n=cs;n<=endN;n++){
+    const p=plannedBy.get(n-cs+1)||0,past=n<=T,dn=past?(doneBy.get(n)||0):0;
+    cp+=p;sp+=p;if(past){cd+=dn;sd+=dn}
+    daily.push([fromN(n),DAYN[dow(n)],p,past?dn:'',past?dn-p:'',past&&p?XP(frac(dn,p)):'',cp,past?cd:'',past?tot-cd:'',past?XP(frac(cd,tot)):''])}
+  daily.push([XB('الإجمالي'),'',XB(sp),XB(sd),XB(sd-sp),'','','','',''] );
+  /* أسبوعي */
+  const weekly=[XH_(['الأسبوع','من','إلى','المطلوب','المحقق','الفرق','النسبة'])];
+  let tp=0,td=0;
+  C.weeks.forEach(w=>{const fut=C.curWeek==null||w.i>C.curWeek;tp+=w.planned;if(!fut||w.done)td+=w.done;
+    weekly.push([w.i+1+(w.i===C.curWeek?' (الحالي)':''),fromN(w.ws),fromN(w.we),w.planned,fut&&!w.done?'':w.done,fut&&!w.done?'':w.done-w.planned,w.planned&&!(fut&&!w.done)?XP(frac(w.done,w.planned)):''])});
+  weekly.push([XB('الإجمالي'),'','',XB(tp),XB(td),XB(td-tp),'']);
+  /* تفاصيل الغسيل */
+  const inCyc=w=>{const n=toN(w.date);return w.cyc!=null?w.cyc===C.k:(n>=cs&&n<ncs)};
+  const det=[XH_(['تاريخ الغسيل','اليوم','كود الاسطمبة','اسم الاسطمبة','المجموعة','اللي سجّل','الموعد المخطط','التأخير بالأيام (سالب = اتغسلت بدري)'])];
+  S.washes.filter(inCyc).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:String(a.code).localeCompare(String(b.code))).forEach(w=>{
+    const m=byCode.get(w.code),pd=m?pdm(m):null,n=toN(w.date);
+    det.push([w.date,DAYN[dow(n)],String(w.code),m?m.n:'(اسطمبة محذوفة)',m?m.g:'',w.by||'',pd?fromN(cs+pd-1):'بدون موعد',pd?n-(cs+pd-1):''])});
+  /* المتبقي */
+  const when=new Map();C.days.forEach(d=>d.items.forEach(m=>when.set(m.c,d.n)));
+  const rem=[XH_(['كود الاسطمبة','اسم الاسطمبة','المجموعة','الموعد المخطط','الحالة','الموعد المتوقع'])];
+  C.rem.slice().sort((a,b)=>(pdm(a)||1e9)-(pdm(b)||1e9)).forEach(m=>{
+    const pd=pdm(m),late=C.lateDays(m);
+    rem.push([String(m.c),m.n,m.g,pd?fromN(cs+pd-1):'بدون موعد',late?'متأخرة '+late+' يوم':(C.pinOf(m)!=null?'مثبتة':'في الموعد'),when.has(m.c)?fromN(when.get(m.c)):''])});
+  /* ملخص */
+  const pct=frac(C.doneCount,tot),sum=[
+    [XB('تقرير غسيل الاسطمبات')],[],
+    [XL('الدورة'),C.k+1],[XL('من'),fromN(cs)],[XL('إلى'),fromN(ncs-1)],[XL('تاريخ التقرير'),fromN(T)],
+    [XL('إجمالي الاسطمبات'),tot],[XL('المحقق (اتغسل)'),C.doneCount],[XL('المتبقي'),C.rem.length],[XL('المتأخر عن موعده'),C.overdue.length],
+    [XL('نسبة الإنجاز'),XP(pct)],[XL('المفروض يكون اتغسل لحد النهارده'),C.expected],[XL('الفرق (قدّام + / ورا −)'),C.doneCount-C.expected],
+    [XL('الانتهاء المتوقع'),C.finish==null?'خلصت':fromN(C.finish)],[],
+    XH_(['المجموعة','الإجمالي','المحقق','المتبقي','النسبة'])];
+  const g={},gs=[];C.order.forEach(m=>{if(!g[m.g]){g[m.g]={t:0,d:0};gs.push(m.g)}g[m.g].t++;if(C.done.has(m.c))g[m.g].d++});
+  gs.forEach(k=>sum.push([k,g[k].t,g[k].d,g[k].t-g[k].d,XP(frac(g[k].d,g[k].t))]));
+  return [
+   {name:'ملخص',rows:sum,widths:[34,16,14,14,12]},
+   {name:'يومي',rows:daily,widths:[16,12,10,10,16,14,14,14,16,16],freeze:true},
+   {name:'أسبوعي',rows:weekly,widths:[14,14,14,12,12,10,10],freeze:true},
+   {name:'تفاصيل الغسيل',rows:det,widths:[14,12,14,46,24,16,16,12],freeze:true},
+   {name:'المتبقي',rows:rem,widths:[14,46,24,16,16,16],freeze:true}]}
+async function exportReport(){
+  if(!S.loaded.w){toast('لسه بنحمّل سجل الغسيل، استنى ثانية وجرب تاني.');return}
+  try{downloadBlob(makeXlsx(buildReport()),'molds-wash-report-'+todayISO()+'.xlsx');toast('اتنزّل التقرير.')}
+  catch(e){toast('حصل خطأ في عمل التقرير.')}}
+function exportBtnHtml(){
+  return '<div class="panel pad row-flex" style="margin-bottom:12px"><div><b>تقرير Excel</b><div class="sub">المخطط والمحقق والمتبقي باليوم وبالأسبوع، وتفاصيل كل غسيل.</div></div><button class="btn primary" data-act="exportXlsx">تحميل التقرير</button></div>'}
 function errMsg(e){return e&&e.code==='permission-denied'?'Firebase رافض القراءة والكتابة. اظبط الـ Rules زي ما في الشرح.':'مش قادر أتصل بقاعدة البيانات ('+(e&&e.code||'خطأ')+').'}
 async function addMold(code,name,grp,pin){
   if(!canWriteNow())return false;
@@ -323,7 +424,7 @@ function viewUpcoming(){
 
 function viewStats(){
   const tot=C.order.length,pct=tot?Math.round(C.doneCount/tot*100):0,diff=C.doneCount-C.expected;
-  let h='<div class="grid">'
+  let h=exportBtnHtml()+'<div class="grid">'
    +'<div class="panel stat"><b>'+pct+'%</b><span>إنجاز الدورة ('+C.doneCount+' من '+tot+')</span></div>'
    +'<div class="panel stat"><b>'+C.rem.length+'</b><span>متبقي</span></div>'
    +'<div class="panel stat"><b style="color:'+(C.overdue.length?'var(--bad)':'var(--ok)')+'">'+C.overdue.length+'</b><span>متأخر عن موعده</span></div>'
@@ -440,6 +541,7 @@ document.addEventListener('click',async ev=>{
   if(a==='askReset'){S.confirmReset=true;return render()}
   if(a==='noReset'){S.confirmReset=false;return render()}
   if(a==='doReset')return resetAll();
+  if(a==='exportXlsx')return exportReport();
   if(a==='wash')return wash(code,fromN(C.T));
   if(a==='undo')return unwash(code,fromN(C.T));
   if(a==='moreDays'){S.upN+=14;return render()}
